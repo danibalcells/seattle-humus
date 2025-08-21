@@ -1,0 +1,147 @@
+import asyncio
+import os
+import re
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import httpx
+from dotenv import load_dotenv
+from pylitterbot import Account
+from openai import OpenAI
+
+
+def parse_pet_weight(text: str) -> float:
+    match = re.search(r"([-+]?\d+(?:\.\d+)?)\s*(?:lb|lbs)\b", text, re.IGNORECASE)
+    if not match:
+        raise ValueError("No weight found in text")
+    return float(match.group(1))
+
+
+def detect_cat(weight_lbs: float) -> str:
+    return "Margarita" if weight_lbs < 13.0 else "Paloma"
+
+
+def format_timestamp(dt: datetime) -> str:
+    local_dt = dt.astimezone()
+    return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+async def send_telegram_message(token: str, chat_id: str, text: str) -> None:
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = {"chat_id": chat_id, "text": text}
+    timeout = httpx.Timeout(10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, data=data)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Telegram API error {resp.status_code}: {resp.text}")
+
+
+def extract_weight_events(history: Iterable[Any]) -> List[Tuple[datetime, str]]:
+    events: List[Tuple[datetime, str]] = []
+    for event in history:
+        action = getattr(event, "action", None)
+        ts = getattr(event, "timestamp", None)
+        if isinstance(action, str) and isinstance(ts, datetime) and action.lower().startswith("pet weight recorded"):
+            events.append((ts, action))
+    events.sort(key=lambda e: e[0])
+    return events
+
+
+def most_recent_timestamp(events: List[Tuple[datetime, str]]) -> Optional[datetime]:
+    return events[-1][0] if events else None
+
+
+def _require_openai_key() -> None:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("Missing OPENAI_API_KEY")
+
+
+def generate_bathroom_message(cat_name: str, weight_lbs: float) -> str:
+    _require_openai_key()
+    client = OpenAI()
+    prompt = (
+        f"Cat name: {cat_name}\n"
+        f"Weight: {weight_lbs:.2f} lbs\n"
+        "Task: Write exactly one short sentence that is cute, dry, and funny, "
+        f"telling us that {cat_name} just used the bathroom, and their weight. Avoid emojis and hashtags. No timestamp."
+    )
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a concise, dry-humored cat status announcer."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.6,
+        max_tokens=50,
+    )
+    content = resp.choices[0].message.content
+    text = content if isinstance(content, str) and content else f"{cat_name} just used the bathroom and weighs {weight_lbs:.2f} lbs."
+    return text.strip()
+
+
+async def poll_litter_robot_and_notify(interval_seconds: int) -> None:
+    load_dotenv()
+    username = os.getenv("LITTERROBOT_USERNAME")
+    password = os.getenv("LITTERROBOT_PASSWORD")
+    tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    tg_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not username or not password:
+        raise RuntimeError("Missing LITTERROBOT_USERNAME or LITTERROBOT_PASSWORD")
+    if not tg_token or not tg_chat_id:
+        raise RuntimeError("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
+
+    account = Account()
+    await account.connect(username=username, password=password, load_robots=True)
+    try:
+        last_seen_per_robot: Dict[str, Optional[datetime]] = {}
+        for robot in account.robots:
+            history = await getattr(robot, "get_activity_history")()
+            weight_events = extract_weight_events(history)
+            last_seen_per_robot[str(getattr(robot, "id", id(robot)))] = most_recent_timestamp(weight_events)
+
+        while True:
+            for robot in account.robots:
+                robot_id = str(getattr(robot, "id", id(robot)))
+                robot_name = getattr(robot, "name", str(robot))
+                history = await getattr(robot, "get_activity_history")()
+                weight_events = extract_weight_events(history)
+                last_seen = last_seen_per_robot.get(robot_id)
+                new_events: List[Tuple[datetime, str]] = []
+                for ts, text in weight_events:
+                    if last_seen is None or ts > last_seen:
+                        new_events.append((ts, text))
+                if new_events:
+                    for ts, text in new_events:
+                        weight = parse_pet_weight(text)
+                        cat = detect_cat(weight)
+                        msg = await asyncio.to_thread(generate_bathroom_message, cat, weight)
+                        await send_telegram_message(tg_token, tg_chat_id, msg)
+                    last_seen_per_robot[robot_id] = new_events[-1][0]
+            await asyncio.sleep(interval_seconds)
+    finally:
+        await account.disconnect()
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+async def _amain() -> None:
+    interval = env_int("POLL_INTERVAL_SECONDS", 60)
+    await poll_litter_robot_and_notify(interval)
+
+
+def main() -> None:
+    asyncio.run(_amain())
+
+
+if __name__ == "__main__":
+    main()
+
+
