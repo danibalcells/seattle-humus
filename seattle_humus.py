@@ -107,7 +107,7 @@ def generate_bathroom_message(cat_name: str, weight_lbs: float) -> str:
         f"telling us that {cat_name} just used the bathroom, and their weight. Avoid emojis and hashtags. No timestamp."
     )
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are a concise, dry-humored cat status announcer."},
             {"role": "user", "content": prompt},
