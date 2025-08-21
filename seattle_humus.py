@@ -11,6 +11,10 @@ from pylitterbot import Account
 from openai import OpenAI
 
 
+PALOMA_WEIGHT_THRESHOLD = 13.0
+MIN_WEIGHT_FOR_NOTIFICATION = 10.0
+
+
 MARGARITA_STICKER_IDS = [
     'CAACAgEAAxkBAAEPMytoppUVe7fyBDxR3Q50bQ9Eqa3qjAACGgQAAuewcEcNR614LPY-NDYE',
     'CAACAgEAAxkBAAEPMwtoppI9Dd2PtoDvB0kqJIsfshVmSwACvwQAAmK2aEcITvOjKzSM4DYE',
@@ -41,7 +45,7 @@ def parse_pet_weight(text: str) -> float:
 
 
 def detect_cat(weight_lbs: float) -> str:
-    return "Margarita" if weight_lbs < 13.0 else "Paloma"
+    return "Margarita" if weight_lbs < PALOMA_WEIGHT_THRESHOLD else "Paloma"
 
 
 def format_timestamp(dt: datetime) -> str:
@@ -105,11 +109,23 @@ def generate_bathroom_message(cat_name: str, weight_lbs: float) -> str:
         f"Weight: {weight_lbs:.2f} lbs\n"
         "Write a short sentence that is dorky and a bit unhinged about our cats lol "
         f"telling us that {cat_name} just used the bathroom, including their weight. Avoid emojis and hashtags"
+        "Feel free to use nicknames for the cat like 'palouma', 'dovey', 'seattle' or whatever you want for Paloma, and 'margie', 'margaroo', 'margo', 'daisy' or 'hummus' for Margarita"
+        "honestly tho feel free to say goofy shit like messing up grammar or misusing words"
+        "For example: "
+        "  - Hahahaha paloma just used the bathroom and weighs 10lbs"
+        "  - Yo, heads up - margie went to the toilet. turns out she weighs 13lbs"
+        "  - paloma weighs 12.9 pounds! that would be a lot of poop so thank god most of her is cuteness instead"
+        "  - baby don't use the toilet in the living room for a while, margarita just made a mess. the LBS number is 13.1"
+        "  - paloma just toileted the use and pounded 12.9"
+        "  - mAAARG hehe you stanky little girl you should be 10 lbs proud"
+        "  - the daisycat skibbed the di for 12.1 numbers of pound"
+        "  - WHAT IF i told you that you could be a 10lb cat and still have a big poop. well that's what happened to margarita"
+        "  - POUND POUND POUND POUND POUND POUND POUND POUND POUND POUND PO. That's 10.4 pounds just like margies latest weighing in at the tualet"
     )
     resp = client.chat.completions.create(
         model="gpt-4.1",
         messages=[
-            {"role": "system", "content": "You are a cat lady"},
+            {"role": "system", "content": "You are a dorky cat lady spirit, all meaning is optional and must be found in the litter airport."},
             {"role": "user", "content": prompt},
         ],
         temperature=1.0,
@@ -154,11 +170,12 @@ async def poll_litter_robot_and_notify(interval_seconds: int) -> None:
                 if new_events:
                     for ts, text in new_events:
                         weight = parse_pet_weight(text)
-                        cat = detect_cat(weight)
-                        sticker_id = choose_sticker_id(cat)
-                        await send_telegram_sticker(tg_token, tg_chat_id, sticker_id)
-                        msg = await asyncio.to_thread(generate_bathroom_message, cat, weight)
-                        await send_telegram_message(tg_token, tg_chat_id, msg)
+                        if weight > MIN_WEIGHT_FOR_NOTIFICATION:
+                            cat = detect_cat(weight)
+                            sticker_id = choose_sticker_id(cat)
+                            await send_telegram_sticker(tg_token, tg_chat_id, sticker_id)
+                            msg = await asyncio.to_thread(generate_bathroom_message, cat, weight)
+                            await send_telegram_message(tg_token, tg_chat_id, msg)
                     last_seen_per_robot[robot_id] = new_events[-1][0]
             await asyncio.sleep(interval_seconds)
     finally:
