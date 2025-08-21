@@ -103,16 +103,16 @@ def generate_bathroom_message(cat_name: str, weight_lbs: float) -> str:
     prompt = (
         f"Cat name: {cat_name}\n"
         f"Weight: {weight_lbs:.2f} lbs\n"
-        "Task: Write exactly one short sentence that is cute, dry, and funny, "
-        f"telling us that {cat_name} just used the bathroom, and their weight. Avoid emojis and hashtags. No timestamp."
+        "Write a short sentence that is dorky and a bit unhinged about our cats lol "
+        f"telling us that {cat_name} just used the bathroom, including their weight. Avoid emojis and hashtags"
     )
     resp = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4.1",
         messages=[
-            {"role": "system", "content": "You are a concise, dry-humored cat status announcer."},
+            {"role": "system", "content": "You are a cat lady"},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.6,
+        temperature=1.0,
         max_tokens=50,
     )
     content = resp.choices[0].message.content
