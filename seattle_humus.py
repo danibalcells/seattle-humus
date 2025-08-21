@@ -5,10 +5,32 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import httpx
+import random
 from dotenv import load_dotenv
 from pylitterbot import Account
 from openai import OpenAI
 
+
+MARGARITA_STICKER_IDS = [
+    'CAACAgEAAxkBAAEPMvRoppF8r9pAtw1wauyjBpxFsyf45gACFgYAAjppWESE-aRS6z9qaTYE',
+    'CAACAgEAAxkBAAEPMwtoppI9Dd2PtoDvB0kqJIsfshVmSwACvwQAAmK2aEcITvOjKzSM4DYE',
+    'CAACAgEAAxkBAAEPMw1oppJLp6m7cfX6tXhhXUF7CQca_AACkQQAAuOnKEXKH-BDT3PXbTYE',
+    'CAACAgEAAxkBAAEPMw9oppJVjZFoRHOkuqU4b0dnuYqaaAACrQUAAkCSKEVsRh8UNnqRYTYE',
+    'CAACAgEAAxkBAAEPMxFoppJhptR6-uJuKWdwz-z0nXoUmwACiAYAAgHpcUe-LriOk3onbzYE',
+    'CAACAgEAAxkBAAEPMxVoppJ-zCaFifpQgEDp8XvYJ2LKSgACzAcAAixjuUSJbzbpmBy86DYE'
+]
+
+PALOMA_STICKER_IDS = [
+    'CAACAgEAAxkBAAEPMvZoppGDmpsRHL2wxY1yxz_IfjVvhQAC1QUAAjppSET2S3v2fu9GgTYE',
+    'CAACAgEAAxkBAAEPMvhoppG2Hvdn7kuLGreiX-wq8vlL7QACqwUAAjG1eEScgGsiZxfjYDYE',
+    'CAACAgEAAxkBAAEPMvloppHC67T4lanmgiq-6awF8CLGtwACUgYAAo1yKUVefr9Qcf5tmzYE',
+    'CAACAgEAAxkBAAEPMvpoppHKY4mXNRMY7fuXuiPHdoG1LwACJQYAAo1yKUXLpJiq7bgRCDYE',
+    'CAACAgEAAxkBAAEPMwVoppIWBNoUR1q1-6EJyw4CSqkpEAACFwYAAjppWERED9_yahbDJDYE',
+    'CAACAgEAAxkBAAEPMwdoppIip0tHM7JkIz9pmqSNVyM4iwACJwUAAkb3WERgFuv6nyOcrzYE',
+    'CAACAgEAAxkBAAEPMwloppIuPVeQc_eKDhup1cyFW86xVgACIgYAAo1yKUUEwgl37X-V5DYE',
+    'CAACAgEAAxkBAAEPMxNoppJscrfOxiLybMYG8u2dYtLAUAACSQgAAu7QgEQoNA5yZ6AuDDYE',
+    'CAACAgEAAxkBAAEPMxdoppKNBgKaoyVFHREOsl7Ec02IvQACPAYAAriqaETWOr6ybnBmdjYE'
+]
 
 def parse_pet_weight(text: str) -> float:
     match = re.search(r"([-+]?\d+(?:\.\d+)?)\s*(?:lb|lbs)\b", text, re.IGNORECASE)
@@ -34,6 +56,24 @@ async def send_telegram_message(token: str, chat_id: str, text: str) -> None:
         resp = await client.post(url, data=data)
         if resp.status_code != 200:
             raise RuntimeError(f"Telegram API error {resp.status_code}: {resp.text}")
+
+
+async def send_telegram_sticker(token: str, chat_id: str, sticker_file_id: str) -> None:
+    url = f"https://api.telegram.org/bot{token}/sendSticker"
+    data = {"chat_id": chat_id, "sticker": sticker_file_id}
+    timeout = httpx.Timeout(10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, data=data)
+        if resp.status_code != 200:
+            if resp.status_code == 400 and "wrong file identifier" in resp.text.lower():
+                return
+            raise RuntimeError(f"Telegram API error {resp.status_code}: {resp.text}")
+
+
+def choose_sticker_id(cat_name: str) -> str:
+    if cat_name == "Margarita":
+        return random.choice(MARGARITA_STICKER_IDS)
+    return random.choice(PALOMA_STICKER_IDS)
 
 
 def extract_weight_events(history: Iterable[Any]) -> List[Tuple[datetime, str]]:
@@ -114,6 +154,8 @@ async def poll_litter_robot_and_notify(interval_seconds: int) -> None:
                     for ts, text in new_events:
                         weight = parse_pet_weight(text)
                         cat = detect_cat(weight)
+                        sticker_id = choose_sticker_id(cat)
+                        await send_telegram_sticker(tg_token, tg_chat_id, sticker_id)
                         msg = await asyncio.to_thread(generate_bathroom_message, cat, weight)
                         await send_telegram_message(tg_token, tg_chat_id, msg)
                     last_seen_per_robot[robot_id] = new_events[-1][0]

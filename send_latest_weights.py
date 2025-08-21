@@ -6,7 +6,14 @@ from typing import Dict, Iterable, List, Tuple
 from dotenv import load_dotenv
 from pylitterbot import Account
 
-from seattle_humus import extract_weight_events, parse_pet_weight, send_telegram_message, generate_bathroom_message
+from seattle_humus import (
+    extract_weight_events,
+    parse_pet_weight,
+    send_telegram_message,
+    generate_bathroom_message,
+    choose_sticker_id,
+    send_telegram_sticker,
+)
 
 
 def _latest_by_cat(events: Iterable[Tuple[datetime, str]]) -> Dict[str, Tuple[datetime, float]]:
@@ -51,6 +58,8 @@ async def _amain() -> None:
         if not entry:
             continue
         _, weight = entry
+        sticker_id = choose_sticker_id(name)
+        await send_telegram_sticker(tg_token, tg_chat_id, sticker_id)
         msg = await asyncio.to_thread(generate_bathroom_message, name, weight)
         await send_telegram_message(tg_token, tg_chat_id, msg)
 
